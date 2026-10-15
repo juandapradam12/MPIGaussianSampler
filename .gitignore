@@ -1,0 +1,28 @@
+# Build artifacts
+bin/
+*.o
+*.a
+*.so
+
+# Generated samples and figures
+output/*.dat
+output/*.png
+output/*.pdf
+!output/.gitkeep
+
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+.env
+
+# Editor / OS
+.DS_Store
+.idea/
+.vscode/
+*~
+
+# Cluster leftovers
+*.o[0-9]*
+*.e[0-9]*
