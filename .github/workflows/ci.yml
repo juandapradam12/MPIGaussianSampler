@@ -1,0 +1,52 @@
+name: CI
+
+on:
+  push:
+    branches: [master, main, "cursor/**"]
+  pull_request:
+
+jobs:
+  build-and-demo:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install MPI
+        run: |
+          sudo apt-get update
+          sudo DEBIAN_FRONTEND=noninteractive apt-get install -y libopenmpi-dev openmpi-bin
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install Python dependencies
+        run: pip install -r requirements.txt
+
+      - name: Build
+        run: make all examples
+
+      - name: Run sampler
+        env:
+          OMPI_MCA_rmaps_base_oversubscribe: "true"
+          OMPI_MCA_btl_vader_single_copy_mechanism: none
+        run: |
+          mkdir -p output
+          mpiexec --oversubscribe -n 2 ./bin/sampler 20000 0.0 1.0 output/sample.dat --seed 42
+
+      - name: Validate and plot
+        run: |
+          python3 scripts/plot_distribution.py \
+            --input output/sample.dat \
+            --mu 0.0 \
+            --sigma 1.0 \
+            --output output/distribution.png
+
+      - name: Smoke-test examples
+        env:
+          OMPI_MCA_rmaps_base_oversubscribe: "true"
+        run: |
+          mpiexec --oversubscribe -n 2 ./bin/mpi_hello
+          mpiexec --oversubscribe -n 2 ./bin/mpi_send_recv

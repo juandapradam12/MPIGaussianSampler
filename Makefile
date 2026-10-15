@@ -17,6 +17,7 @@ N        ?= 100000
 MU       ?= 2.5
 SIGMA    ?= 3.5
 NP       ?= 4
+SEED     ?= 42
 SAMPLE   := $(OUT_DIR)/sample.dat
 FIGURE   := $(OUT_DIR)/distribution.png
 
@@ -42,7 +43,7 @@ $(SENDRECV): $(SRC_DIR)/examples/mpi_send_recv.c | $(BIN_DIR)
 	$(MPICC) $(CFLAGS) $< -o $@
 
 run: $(SAMPLER) | $(OUT_DIR)
-	mpiexec --oversubscribe -n $(NP) $(SAMPLER) $(N) $(MU) $(SIGMA) $(SAMPLE)
+	mpiexec --oversubscribe -n $(NP) $(SAMPLER) $(N) $(MU) $(SIGMA) $(SAMPLE) --seed $(SEED)
 
 plot: $(SAMPLE)
 	python3 scripts/plot_distribution.py --input $(SAMPLE) --mu $(MU) --sigma $(SIGMA) --output $(FIGURE)

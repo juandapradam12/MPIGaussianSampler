@@ -4,7 +4,7 @@
 
 Drawing large independent samples from a normal distribution is a common Monte Carlo building block. On a single core the cost scales as $O(N)$. With $P$ ranks the same workload can be partitioned so each process draws roughly $N / P$ values and a single gather reconstructs the full sample.
 
-This repository implements that workflow end to end: a C/MPI sampler, a small Box–Muller module, and a Python plot that checks the empirical density against the closed-form PDF.
+This repository implements that workflow end to end: a C/MPI sampler, a small Box–Muller module, and a Python tool that both plots and scores the empirical distribution against the closed-form PDF.
 
 ## Model
 
@@ -33,20 +33,30 @@ are i.i.d. standard normal, and $X = \mu + \sigma Z$ recovers the target law.
 | Stage | Responsibility |
 | --- | --- |
 | Partition | Rank $r$ owns $n_r = \lfloor N / P \rfloor$ or $\lfloor N / P \rfloor + 1$ samples |
-| Seed | Each rank seeds independently (`time + rank · prime`) so streams do not collide |
+| Seed | Base seed $S$ (CLI `--seed`); rank $r$ uses $S + 9973\,r$ |
 | Draw | Local Box–Muller loop fills a contiguous buffer |
 | Gather | `MPI_Gatherv` collects variable-sized chunks on rank 0 |
 | Persist | Rank 0 writes one sample file; other ranks exit cleanly |
 
 Point-to-point hello-world and send/recv programs under `src/examples/` isolate the MPI primitives used by the sampler.
 
+## Timing and scaling
+
+The sampler reports the max-over-ranks wall time for the draw + gather phase (`MPI_Wtime`). For fixed $N$ (strong scaling), that time should drop as $P$ grows until communication or RNG overhead dominates. For fixed work per rank (weak scaling), wall time should stay roughly flat while $N \propto P$.
+
 ## Validation
 
-After a run, the histogram of the gathered sample should track $f(x \mid \mu, \sigma)$. The plotting script overlays both and writes `output/distribution.png`. For large $N$ the match is visual; mean and variance of the file should also approach $\mu$ and $\sigma^2$.
+The plotting script reports:
+
+- sample mean and standard deviation versus $(\mu, \sigma)$
+- absolute mean error and absolute variance error
+- a Pearson $\chi^2$ goodness-of-fit against $\mathcal{N}(\mu, \sigma^2)$ on merged histogram bins (expected count $\ge 5$), with a $p$-value from the upper incomplete gamma
+
+Together with the PDF overlay in `output/distribution.png`, these checks confirm that the parallel sample matches the target law for large $N$.
 
 ## Design notes
 
-- **Separation of concerns.** RNG logic lives in `box_muller.c`; communication and I/O live in `sampler.c`; visualization is a separate Python tool.
-- **Correct MPI usage.** The original exercise wrote from every rank into the same path. The rewrite gathers once and writes once.
-- **Portable CLI.** Arguments are validated on rank 0, broadcast, and shared so every process agrees on $N$, $\mu$, and $\sigma$.
-- **Reproducible layout.** `Makefile` targets (`all`, `run`, `plot`, `demo`, `examples`) encode the intended workflow without cluster-specific scripts.
+- **Separation of concerns.** RNG logic lives in `box_muller.c`; communication, seeding, timing, and I/O live in `sampler.c`; visualization and GOF live in Python.
+- **Single writer.** Local buffers are gathered once; only rank 0 touches the output path.
+- **Shared configuration.** Arguments are validated on rank 0 and broadcast so every process agrees on $N$, $\mu$, $\sigma$, and $S$.
+- **Reproducible workflow.** `Makefile` targets and GitHub Actions CI encode the intended build → sample → validate path.

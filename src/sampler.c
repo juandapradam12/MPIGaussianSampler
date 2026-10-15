@@ -13,45 +13,83 @@
  * process gathers the full vector and writes it to disk.
  *
  * Usage:
- *   mpiexec -n <P> ./bin/sampler <N> <mu> <sigma> [output_path]
+ *   mpiexec -n <P> ./bin/sampler <N> <mu> <sigma> [output_path] [--seed S]
  */
 
 static void usage(const char *prog)
 {
     fprintf(stderr,
-            "Usage: %s <N> <mu> <sigma> [output_path]\n"
+            "Usage: %s <N> <mu> <sigma> [output_path] [--seed S]\n"
             "  N            total number of samples (positive integer)\n"
             "  mu           mean of the Gaussian\n"
             "  sigma        standard deviation (must be > 0)\n"
             "  output_path  optional path for the sample file "
-            "(default: output/sample.dat)\n",
+            "(default: output/sample.dat)\n"
+            "  --seed S     optional base RNG seed; rank r uses S + r * 9973\n"
+            "               (default: time-based, non-reproducible)\n",
             prog);
 }
 
 static int parse_args(int argc, char **argv, long *n_total, double *mu,
-                      double *sigma, const char **output_path)
+                      double *sigma, const char **output_path,
+                      unsigned int *seed, int *seed_set)
 {
-    if (argc < 4 || argc > 5) {
+    *output_path = "output/sample.dat";
+    *seed = 0;
+    *seed_set = 0;
+
+    const char *positionals[4];
+    int npos = 0;
+
+    for (int i = 1; i < argc; ++i) {
+        if (strcmp(argv[i], "--seed") == 0) {
+            if (i + 1 >= argc) {
+                return -1;
+            }
+            char *end = NULL;
+            unsigned long value = strtoul(argv[++i], &end, 10);
+            if (end == argv[i] || *end != '\0') {
+                return -1;
+            }
+            *seed = (unsigned int)value;
+            *seed_set = 1;
+            continue;
+        }
+
+        if (argv[i][0] == '-' && argv[i][1] == '-') {
+            return -1;
+        }
+
+        if (npos >= 4) {
+            return -1;
+        }
+        positionals[npos++] = argv[i];
+    }
+
+    if (npos < 3 || npos > 4) {
         return -1;
     }
 
     char *end = NULL;
-    *n_total = strtol(argv[1], &end, 10);
-    if (end == argv[1] || *end != '\0' || *n_total <= 0) {
+    *n_total = strtol(positionals[0], &end, 10);
+    if (end == positionals[0] || *end != '\0' || *n_total <= 0) {
         return -1;
     }
 
-    *mu = strtod(argv[2], &end);
-    if (end == argv[2] || *end != '\0') {
+    *mu = strtod(positionals[1], &end);
+    if (end == positionals[1] || *end != '\0') {
         return -1;
     }
 
-    *sigma = strtod(argv[3], &end);
-    if (end == argv[3] || *end != '\0' || *sigma <= 0.0) {
+    *sigma = strtod(positionals[2], &end);
+    if (end == positionals[2] || *end != '\0' || *sigma <= 0.0) {
         return -1;
     }
 
-    *output_path = (argc == 5) ? argv[4] : "output/sample.dat";
+    if (npos == 4) {
+        *output_path = positionals[3];
+    }
+
     return 0;
 }
 
@@ -104,12 +142,17 @@ int main(int argc, char **argv)
     double mu = 0.0;
     double sigma = 0.0;
     const char *output_path = NULL;
+    unsigned int seed = 0;
+    int seed_set = 0;
 
     int parse_ok = 0;
     if (rank == 0) {
-        parse_ok = (parse_args(argc, argv, &n_total, &mu, &sigma, &output_path) == 0);
+        parse_ok = (parse_args(argc, argv, &n_total, &mu, &sigma, &output_path,
+                               &seed, &seed_set) == 0);
         if (!parse_ok) {
             usage(argv[0]);
+        } else if (!seed_set) {
+            seed = (unsigned int)time(NULL);
         }
     }
 
@@ -122,6 +165,7 @@ int main(int argc, char **argv)
     MPI_Bcast(&n_total, 1, MPI_LONG, 0, MPI_COMM_WORLD);
     MPI_Bcast(&mu, 1, MPI_DOUBLE, 0, MPI_COMM_WORLD);
     MPI_Bcast(&sigma, 1, MPI_DOUBLE, 0, MPI_COMM_WORLD);
+    MPI_Bcast(&seed, 1, MPI_UNSIGNED, 0, MPI_COMM_WORLD);
 
     int *counts = (int *)malloc((size_t)size * sizeof(int));
     int *displs = (int *)malloc((size_t)size * sizeof(int));
@@ -135,8 +179,8 @@ int main(int argc, char **argv)
     int local_n = 0;
     local_counts(n_total, size, rank, &local_n, counts, displs);
 
-    /* Distinct stream per rank; still reproducible for a fixed process count. */
-    srand((unsigned int)(time(NULL) + rank * 9973));
+    /* Distinct, reproducible stream per rank for a fixed process count. */
+    srand(seed + (unsigned int)rank * 9973u);
 
     double *local = (double *)malloc((size_t)local_n * sizeof(double));
     if (local == NULL) {
@@ -145,6 +189,8 @@ int main(int argc, char **argv)
         free(displs);
         MPI_Abort(MPI_COMM_WORLD, EXIT_FAILURE);
     }
+
+    const double t0 = MPI_Wtime();
 
     for (int i = 0; i < local_n; ++i) {
         local[i] = box_muller_normal(mu, sigma);
@@ -165,12 +211,20 @@ int main(int argc, char **argv)
     MPI_Gatherv(local, local_n, MPI_DOUBLE, global, counts, displs, MPI_DOUBLE, 0,
                 MPI_COMM_WORLD);
 
+    const double t1 = MPI_Wtime();
+    double elapsed = t1 - t0;
+    double max_elapsed = 0.0;
+    MPI_Reduce(&elapsed, &max_elapsed, 1, MPI_DOUBLE, MPI_MAX, 0, MPI_COMM_WORLD);
+
     int write_status = 0;
     if (rank == 0) {
         write_status = write_samples(output_path, global, n_total);
         if (write_status == 0) {
-            printf("Wrote %ld samples from N(%.6f, %.6f^2) using %d ranks to %s\n",
-                   n_total, mu, sigma, size, output_path);
+            printf("Wrote %ld samples from N(%.6f, %.6f^2) using %d ranks "
+                   "(seed=%u) to %s\n",
+                   n_total, mu, sigma, size, seed, output_path);
+            printf("Draw + gather wall time: %.6f s (max over ranks)\n",
+                   max_elapsed);
         } else {
             fprintf(stderr, "Failed to write samples to %s\n", output_path);
         }
