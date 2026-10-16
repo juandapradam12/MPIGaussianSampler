@@ -1,10 +1,8 @@
 # Parallel Gaussian Sampler (MPI)
 
-Monte Carlo sampling of $\mathcal{N}(\mu, \sigma^2)$ distributed across MPI ranks, with quantitative checks against the theoretical density.
+Parallel Monte Carlo Gaussian sampler (C/MPI) with reproducible seeding and statistical validation against $\mathcal{N}(\mu, \sigma^2)$.
 
-Portfolio case study: a small numerical workload with clear module boundaries, correct collective communication, reproducible seeding, and a build/plot/CI pipeline.
-
-> Suggested GitHub repository name: `mpi-gaussian-sampler` (rename under **Settings → General** if the remote is still titled as a course exercise).
+Portfolio case study: clear module boundaries, correct collective communication, and a reproducible build → sample → validate pipeline.
 
 ## What it does
 
@@ -29,7 +27,7 @@ src/
 scripts/
   plot_distribution.py  Histogram, PDF overlay, and GOF stats
 docs/
-  case-study.md         Problem statement, math, and design notes
+  case-study.md         Problem statement, math, scaling, and design notes
 .github/workflows/ci.yml
 output/                 Generated samples and figures (gitignored)
 ```
@@ -75,8 +73,8 @@ mpiexec -n 2 ./bin/mpi_send_recv
 - Partitioned Monte Carlo with `MPI_Gatherv` and a single writer on rank 0
 - Isolated Box–Muller module, MPI driver, and Python validation/plotting
 - Reproducible `--seed`, wall-clock timing for the draw + gather phase
-- Portable `Makefile` targets and GitHub Actions CI
+- Measured strong-scaling table in the case study; portable `Makefile` + GitHub Actions CI
 
 ## Further reading
 
-See [docs/case-study.md](docs/case-study.md) for the sampling model, parallel partition, timing notes, and validation details.
+See [docs/case-study.md](docs/case-study.md) for the sampling model, parallel partition, scaling measurements, and validation details.

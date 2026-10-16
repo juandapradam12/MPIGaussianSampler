@@ -44,6 +44,27 @@ Point-to-point hello-world and send/recv programs under `src/examples/` isolate 
 
 The sampler reports the max-over-ranks wall time for the draw + gather phase (`MPI_Wtime`). For fixed $N$ (strong scaling), that time should drop as $P$ grows until communication or RNG overhead dominates. For fixed work per rank (weak scaling), wall time should stay roughly flat while $N \propto P$.
 
+### Strong scaling ($N = 2\times 10^6$, seed $42$)
+
+Measured on a single oversubscribed workstation (Open MPI `--oversubscribe`). Speedup is $T_1 / T_P$; efficiency is speedup $/\,P$.
+
+| $P$ | Wall time (s) | Speedup | Efficiency |
+| --- | ---: | ---: | ---: |
+| 1 | 0.0702 | 1.00× | 100% |
+| 2 | 0.0324 | 2.17× | 108% |
+| 4 | 0.0355 | 1.98× | 49% |
+| 8 | 0.0274 | 2.56× | 32% |
+
+The $1\to 2$ step nearly doubles throughput. Beyond that, gather cost and core oversubscription flatten the curve — expected on a laptop/CI runner, and a useful reminder that MPI gains need real hardware parallelism.
+
+Reproduce:
+
+```bash
+for P in 1 2 4 8; do
+  mpiexec --oversubscribe -n $P ./bin/sampler 2000000 2.5 3.5 /tmp/s.dat --seed 42
+done
+```
+
 ## Validation
 
 The plotting script reports:

@@ -21,7 +21,7 @@ SEED     ?= 42
 SAMPLE   := $(OUT_DIR)/sample.dat
 FIGURE   := $(OUT_DIR)/distribution.png
 
-.PHONY: all examples run plot demo clean
+.PHONY: all examples run plot demo scale clean
 
 all: $(SAMPLER)
 
